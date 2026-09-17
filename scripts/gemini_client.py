@@ -17,7 +17,16 @@ import config
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
-def _post(model: str, payload: dict, max_retries: int = 3) -> dict:
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+# Total worst case here is about 5.5 minutes of waiting, spread across 6
+# tries - generous on purpose, since a demand spike can outlast a quick
+# retry. Codes outside RETRYABLE_STATUS_CODES (bad model name, bad
+# request, auth problems) fail immediately instead - those won't fix
+# themselves no matter how long you wait.
+BACKOFF_SECONDS = [15, 30, 60, 90, 120, 120]
+
+
+def _post(model: str, payload: dict, max_retries: int = 6) -> dict:
     url = f"{BASE_URL}/{model}:generateContent"
     headers = {"Content-Type": "application/json"}
     params = {"key": config.GEMINI_API_KEY}
@@ -27,9 +36,18 @@ def _post(model: str, payload: dict, max_retries: int = 3) -> dict:
         resp = requests.post(url, headers=headers, params=params, json=payload, timeout=120)
         if resp.status_code == 200:
             return resp.json()
+
         last_error = f"HTTP {resp.status_code}: {resp.text[:500]}"
-        # back off and retry - covers transient rate limits / hiccups
-        time.sleep(5 * attempt)
+
+        if resp.status_code not in RETRYABLE_STATUS_CODES:
+            raise RuntimeError(f"Gemini call to {model} failed with a non-retryable error: {last_error}")
+
+        if attempt < max_retries:
+            wait = BACKOFF_SECONDS[min(attempt - 1, len(BACKOFF_SECONDS) - 1)]
+            print(f"  Gemini returned {resp.status_code} (likely temporary) - retrying in {wait}s "
+                  f"(attempt {attempt}/{max_retries})...")
+            time.sleep(wait)
+
     raise RuntimeError(f"Gemini call to {model} failed after {max_retries} attempts. Last error: {last_error}")
 
 
@@ -60,3 +78,4 @@ def generate_json(prompt: str) -> dict:
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Could not parse JSON from Gemini text response.\nRaw response:\n{raw}") from e
+        
