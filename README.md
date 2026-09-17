@@ -63,11 +63,20 @@ All in `scripts/config.py`:
 - `PRICE_USD` - fixed at $4.99 to start; change anytime
 - `AUDIENCE_HINT` - who it's aimed at
 
-## If the Gumroad step fails on first run
+## If something breaks on a future run
 
-Gumroad's product-creation API is new, and I couldn't fully verify every
-field name against their live docs while building this. If `upload.py`
-errors out, the Action log will print Gumroad's exact response - copy that
-error back to me and it's a quick fix in `scripts/upload_gumroad.py`
-(the generation side is unaffected either way - you'd just upload that
-day's PDF manually as a one-off while it's fixed).
+Two moving parts here are the most likely to shift under you over time,
+since both are on the newer/less-stable side:
+
+- **The Gemini text model name** (`scripts/config.py` → `TEXT_MODEL`).
+  Google retires model names periodically - if a run fails with a 404
+  mentioning the model, the error message itself usually tells you the
+  current replacement. Swap the one line in `config.py` and you're done.
+- **Gumroad's product-creation API** — new, and I couldn't fully verify
+  every field name against their live docs while building this. If
+  `upload_gumroad.py` errors out, the Action log prints Gumroad's exact
+  response - copy that back to me and it's a one-function fix.
+
+Image generation runs on Pollinations.ai (`scripts/pollinations_client.py`),
+which needs no API key at all - Gemini's image models turned out not to
+have a real free tier, so there's nothing to configure or renew there.
