@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import config
 import gemini_client
+import pollinations_client
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 BOLD_FONT_PATH = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
@@ -62,7 +63,8 @@ Respond with ONLY raw JSON, no markdown fences, in exactly this shape:
 
 
 def plan_listing_copy(theme: str, title: str, num_pages: int) -> dict:
-    prompt = f"""Write marketplace listing copy for a printable digital coloring book PDF.
+    prompt = f"""Write marketplace listing copy for a printable digital coloring book PDF,
+sold under the shop name "{config.SHOP_NAME}".
 
 Theme: {theme}
 Title: {title}
@@ -209,7 +211,7 @@ def main():
     print(f"Theme: {theme}\nTitle: {title}\nPages planned: {len(page_concepts)}")
 
     print("Generating cover illustration...")
-    cover_art = gemini_client.generate_image(cover_illustration_prompt(theme))
+    cover_art = pollinations_client.generate_image(cover_illustration_prompt(theme))
     cover_page = build_cover(cover_art, title)
     cover_page.save(os.path.join(config.OUTPUT_DIR, "cover.png"))
 
@@ -217,7 +219,7 @@ def main():
     for i, concept in enumerate(page_concepts, start=1):
         print(f"Generating page {i}/{len(page_concepts)}: {concept}")
         try:
-            art = gemini_client.generate_image(coloring_page_prompt(concept))
+            art = pollinations_client.generate_image(coloring_page_prompt(concept))
         except Exception as e:  # noqa: BLE001 - keep the whole book from failing over one page
             print(f"  Page {i} failed ({e}); leaving it blank rather than stopping the run.")
             art = Image.new("RGB", (1024, 1024), "white")
