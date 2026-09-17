@@ -1,0 +1,65 @@
+name: Daily Coloring Book
+
+on:
+  schedule:
+    - cron: "0 13 * * *"   # 13:00 UTC daily - edit to whatever time suits you
+  workflow_dispatch: {}     # lets you trigger a run manually from the Actions tab / app
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install fonts used for cover/page-number text
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate today's book
+        working-directory: scripts
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python generate_book.py
+
+      - name: Upload book as an artifact for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: coloring-book
+          path: output/
+          retention-days: 14
+
+  upload:
+    needs: generate
+    runs-on: ubuntu-latest
+    # This environment must exist in your repo's Settings > Environments,
+    # with "Required reviewers" turned on and you added as a reviewer.
+    # That's what makes this job pause for your one-tap approval before
+    # anything gets published.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download today's book
+        uses: actions/download-artifact@v4
+        with:
+          name: coloring-book
+          path: output/
+
+      - name: Publish to Gumroad
+        working-directory: scripts
+        env:
+          GUMROAD_ACCESS_TOKEN: ${{ secrets.GUMROAD_ACCESS_TOKEN }}
+        run: python upload_gumroad.py
