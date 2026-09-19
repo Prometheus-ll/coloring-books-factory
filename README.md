@@ -80,3 +80,26 @@ since both are on the newer/less-stable side:
 Image generation runs on Pollinations.ai (`scripts/pollinations_client.py`),
 which needs no API key at all - Gemini's image models turned out not to
 have a real free tier, so there's nothing to configure or renew there.
+A few follow-on fixes worth knowing about:
+
+- **Watermark**: Pollinations stamps a logo on anonymous requests (removing
+  it needs a registered key). Instead of requiring you to sign up for one,
+  the client just requests extra height and crops the watermark strip off
+  before anything else touches the image.
+- **Getting an actual coloring-page look**: the first version asked the
+  image model for "black and white line art, no shading" directly - it
+  ignored that instruction and drew shaded, photorealistic scenes anyway.
+  The current approach asks for a flat, bold-outlined cartoon illustration
+  instead (a style these models are much better at actually following),
+  then converts *that* to line art in `scripts/lineart_processor.py` -
+  much less fighting the model to get a clean result. The color version is
+  also kept and shown as a small "Reference" thumbnail on each page, the
+  same trick real coloring books use, and the cover stays in full color
+  rather than being converted at all.
+- **This is still not guaranteed perfect.** I couldn't test the new prompt
+  style against a live Pollinations call while building this (no network
+  access in my end), so the edge-detection settings are a reasoned
+  estimate, not something verified against real output the way the first
+  version was. If pages come out too sparse, too scribbly, or off-theme,
+  that's exactly what the review gate is for - don't approve it, tell me
+  what's wrong (ideally with the actual PDF), and it gets tuned from there.
