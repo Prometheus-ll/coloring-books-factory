@@ -10,7 +10,7 @@ import os
 SHOP_NAME = "DoodleDrop"
 
 # ---- Content ----
-NUM_INTERIOR_PAGES = 12          # how many coloring pages per book (not counting cover)
+NUM_INTERIOR_PAGES = 24          # how many coloring pages per book (not counting cover)
 AUDIENCE_HINT = "all ages (kids and adults)"
 
 # ---- Output look ----

@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import config
 import gemini_client
+import lineart_processor
 import pollinations_client
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
@@ -46,9 +47,12 @@ every day (avoid plain "animals" or "flowers" on their own; go for a specific
 angle, e.g. "underwater creatures having a tea party" or "tiny robots gardening").
 It should be family-friendly and suitable for {config.AUDIENCE_HINT}.
 
-Then write exactly {config.NUM_INTERIOR_PAGES} distinct page concepts for it -
-each a short (under 12 words) description of a single scene or subject to
-illustrate as a coloring page. No two pages should be near-duplicates.
+Then write exactly {config.NUM_INTERIOR_PAGES} distinct page concepts for it.
+Each concept is a short (under 12 words) description of ONE simple scene with
+ONE clear subject - not a cluttered multi-element composition. Every single
+concept must visibly and literally connect to the theme: if you can remove a
+word or two and the concept could belong to a totally different, unrelated
+book, rewrite it. No two pages should be near-duplicates.
 
 Respond with ONLY raw JSON, no markdown fences, in exactly this shape:
 {{
@@ -82,20 +86,23 @@ Respond with ONLY raw JSON, no markdown fences, in exactly this shape:
 
 def coloring_page_prompt(concept: str) -> str:
     return (
-        f"Black-and-white line art coloring book page for {config.AUDIENCE_HINT}. "
-        f"Subject: {concept}. Bold, clean, fully closed outlines suitable for "
-        f"coloring with crayons or markers. Pure black lines on a pure white "
-        f"background. No shading, no gray fill, no color, no text, no watermark, "
-        f"no signature, no border frame."
+        f"A flat vector cartoon illustration for {config.AUDIENCE_HINT}, in a "
+        f"friendly children's-book style. Subject: {concept}. One clear subject, "
+        f"centered, filling most of the frame. Bold thick black outlines around "
+        f"every shape, flat solid colors with minimal shading or gradients, "
+        f"simple uncluttered background. No text, no watermark, no signature, "
+        f"no border frame."
     )
 
 
 def cover_illustration_prompt(theme: str) -> str:
     return (
-        f"Black-and-white line art illustration for a coloring book cover. "
-        f"Theme: {theme}. Bold clean outlines, no shading, no gray fill, no "
-        f"color, no text, no watermark. Centered composition with open space "
-        f"near the top and bottom of the frame for a title to be added later."
+        f"A flat vector cartoon illustration for a coloring book cover, in a "
+        f"friendly children's-book style. Theme: {theme}. One clear, centered "
+        f"subject that obviously represents the theme. Bold thick black outlines, "
+        f"flat solid colors, vibrant and appealing, simple uncluttered background. "
+        f"No text, no watermark, no signature. Leave open space near the top and "
+        f"bottom of the frame for a title to be added later."
     )
 
 
@@ -116,16 +123,45 @@ def _fit_and_paste(canvas: Image.Image, art: Image.Image, box):
     canvas.paste(art_resized, (paste_x, paste_y))
 
 
-def build_interior_page(art: Image.Image, page_number: int) -> Image.Image:
+def build_interior_page(line_art: Image.Image, reference_art: Image.Image, page_number: int) -> Image.Image:
     canvas = Image.new("RGB", (config.PAGE_WIDTH_PX, config.PAGE_HEIGHT_PX), "white")
     draw = ImageDraw.Draw(canvas)
+
+    # Main line-art illustration fills the page first.
     art_box = (
         config.MARGIN_PX,
         config.MARGIN_PX,
         config.PAGE_WIDTH_PX - config.MARGIN_PX,
         config.PAGE_HEIGHT_PX - config.MARGIN_PX - 100,
     )
-    _fit_and_paste(canvas, art, art_box)
+    _fit_and_paste(canvas, line_art, art_box)
+
+    # Small color reference thumbnail on top, top-right corner - the same
+    # trick your reference coloring book uses, so a colorer can see what
+    # the finished page might look like. Drawn on a white backing box so
+    # it stays legible over whatever line art sits underneath it.
+    thumb_w = int(config.PAGE_WIDTH_PX * 0.22)
+    thumb_h = int(thumb_w * reference_art.height / reference_art.width)
+    thumb_right = config.PAGE_WIDTH_PX - config.MARGIN_PX
+    thumb_top = config.MARGIN_PX
+    thumb_left = thumb_right - thumb_w
+    draw.rectangle(
+        [thumb_left - 10, thumb_top - 10, thumb_right + 10, thumb_top + thumb_h + 60],
+        fill="white",
+    )
+    thumb = reference_art.resize((thumb_w, thumb_h), Image.LANCZOS)
+    canvas.paste(thumb, (thumb_left, thumb_top))
+    draw.rectangle([thumb_left, thumb_top, thumb_right, thumb_top + thumb_h], outline="black", width=3)
+
+    label_font = _font(REGULAR_FONT_PATH, 30)
+    label = "Reference"
+    bbox = draw.textbbox((0, 0), label, font=label_font)
+    label_w = bbox[2] - bbox[0]
+    draw.text(
+        (thumb_left + (thumb_w - label_w) / 2, thumb_top + thumb_h + 10),
+        label, fill="black", font=label_font,
+    )
+
     font = _font(REGULAR_FONT_PATH, config.PAGE_NUMBER_FONT_SIZE)
     number_text = str(page_number)
     bbox = draw.textbbox((0, 0), number_text, font=font)
@@ -219,11 +255,12 @@ def main():
     for i, concept in enumerate(page_concepts, start=1):
         print(f"Generating page {i}/{len(page_concepts)}: {concept}")
         try:
-            art = pollinations_client.generate_image(coloring_page_prompt(concept))
+            color_art = pollinations_client.generate_image(coloring_page_prompt(concept))
         except Exception as e:  # noqa: BLE001 - keep the whole book from failing over one page
             print(f"  Page {i} failed ({e}); leaving it blank rather than stopping the run.")
-            art = Image.new("RGB", (1024, 1024), "white")
-        interior_pages.append(build_interior_page(art, i))
+            color_art = Image.new("RGB", (1024, 1024), "white")
+        line_art = lineart_processor.to_coloring_page(color_art)
+        interior_pages.append(build_interior_page(line_art, color_art, i))
 
     back_page = build_back_page()
 

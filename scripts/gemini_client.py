@@ -78,4 +78,3 @@ def generate_json(prompt: str) -> dict:
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Could not parse JSON from Gemini text response.\nRaw response:\n{raw}") from e
-        

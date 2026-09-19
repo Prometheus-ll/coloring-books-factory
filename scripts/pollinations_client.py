@@ -1,12 +1,16 @@
 """
-Image generation via Pollinations.ai - a genuinely free, key-less image API
-(no signup, no auth header, just a GET request). This replaced Gemini's
-image models, which no longer have a working free API tier.
+Image generation via Pollinations.ai - free, key-less (no signup, no auth
+header, just a GET request).
 
-Trade-off vs a paid model: output can occasionally carry a small watermark
-and is less consistent than Nano Banana / Nano Banana 2. For a $0 hobby
-pipeline that's the right trade; if quality becomes the bottleneck later,
-swap this module for a paid call and nothing else in the pipeline changes.
+Crops off Pollinations' watermark strip: `nologo=true` only works with a
+registered, authenticated key (see README) - anonymous requests get
+stamped regardless. Cheapest fix that needs no signup: ask for a bit of
+extra height and crop the strip off before anything else touches the
+image.
+
+Returns the color image as-is - generate_book.py decides whether to run
+it through lineart_processor (interior pages) or keep it in color (the
+cover, and the small reference thumbnail on each interior page).
 """
 
 import io
@@ -19,17 +23,17 @@ from PIL import Image
 import config
 
 BASE_URL = "https://image.pollinations.ai/prompt"
+WATERMARK_STRIP_PX = 80
 
 
-def generate_image(prompt: str, width: int = 1024, height: int = 1024, max_retries: int = 3) -> Image.Image:
+def generate_image(prompt: str, width: int = 1536, height: int = 1536, max_retries: int = 3) -> Image.Image:
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"{BASE_URL}/{encoded_prompt}"
     params = {
         "width": width,
-        "height": height,
+        "height": height + WATERMARK_STRIP_PX,
         "model": config.POLLINATIONS_IMAGE_MODEL,
-        "nologo": "true",
-        # A random-ish seed keeps consecutive pages from coming back near-identical.
+        "nologo": "true",  # harmless to leave in even though it needs auth to actually work
         "seed": int(time.time() * 1000) % 1_000_000,
     }
 
@@ -38,7 +42,8 @@ def generate_image(prompt: str, width: int = 1024, height: int = 1024, max_retri
         try:
             resp = requests.get(url, params=params, timeout=180)
             if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image/"):
-                return Image.open(io.BytesIO(resp.content)).convert("RGB")
+                img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+                return img.crop((0, 0, img.width, img.height - WATERMARK_STRIP_PX))
             last_error = f"HTTP {resp.status_code}, content-type={resp.headers.get('content-type')}"
         except requests.RequestException as e:
             last_error = str(e)
