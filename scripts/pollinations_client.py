@@ -25,8 +25,15 @@ import config
 BASE_URL = "https://image.pollinations.ai/prompt"
 WATERMARK_STRIP_PX = 80
 
+# Same reasoning as gemini_client.py: server-side/rate-limit type errors
+# are worth waiting out (total worst case here is about 5.5 minutes
+# across 6 tries), but a 4xx that isn't a rate limit won't fix itself no
+# matter how long you wait, so fail fast on those instead.
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+BACKOFF_SECONDS = [15, 30, 60, 90, 120, 120]
 
-def generate_image(prompt: str, width: int = 1536, height: int = 1536, max_retries: int = 3) -> Image.Image:
+
+def generate_image(prompt: str, width: int = 1536, height: int = 1536, max_retries: int = 6) -> Image.Image:
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"{BASE_URL}/{encoded_prompt}"
     params = {
@@ -41,12 +48,31 @@ def generate_image(prompt: str, width: int = 1536, height: int = 1536, max_retri
     for attempt in range(1, max_retries + 1):
         try:
             resp = requests.get(url, params=params, timeout=180)
-            if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image/"):
-                img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-                return img.crop((0, 0, img.width, img.height - WATERMARK_STRIP_PX))
-            last_error = f"HTTP {resp.status_code}, content-type={resp.headers.get('content-type')}"
         except requests.RequestException as e:
             last_error = str(e)
-        time.sleep(5 * attempt)
+            if attempt < max_retries:
+                wait = BACKOFF_SECONDS[min(attempt - 1, len(BACKOFF_SECONDS) - 1)]
+                print(f"  Pollinations request errored ({e}) - retrying in {wait}s "
+                      f"(attempt {attempt}/{max_retries})...")
+                time.sleep(wait)
+            continue
+
+        if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image/"):
+            img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+            return img.crop((0, 0, img.width, img.height - WATERMARK_STRIP_PX))
+
+        # Capture the actual response body - a bare status code told us
+        # nothing useful last time this failed.
+        last_error = f"HTTP {resp.status_code}, content-type={resp.headers.get('content-type')}: {resp.text[:500]}"
+
+        if resp.status_code not in RETRYABLE_STATUS_CODES:
+            raise RuntimeError(f"Pollinations image call failed with a non-retryable error: {last_error}")
+
+        if attempt < max_retries:
+            wait = BACKOFF_SECONDS[min(attempt - 1, len(BACKOFF_SECONDS) - 1)]
+            print(f"  Pollinations returned {resp.status_code} (likely temporary) - retrying in {wait}s "
+                  f"(attempt {attempt}/{max_retries})...")
+            time.sleep(wait)
 
     raise RuntimeError(f"Pollinations image call failed after {max_retries} attempts. Last error: {last_error}")
+    
